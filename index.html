@@ -47,17 +47,17 @@ h1{font-size:clamp(1.8rem,4vw,2.6rem);font-weight:800;letter-spacing:-.02em;marg
 :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;font-size:.8rem;color:var(--muted)}
 .legend i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:6px;vertical-align:-1px}
-.need{font-weight:600;font-size:1.05rem;margin:0 0 2px}
-.need-sub{font-size:.82rem;color:var(--muted);margin:0 0 12px}
-.chosen{list-style:none;margin:0 0 18px;padding:0;display:grid;gap:8px}
-.chosen li{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 12px;font-size:.9rem}
-.chosen li span small{display:block;color:var(--muted);font-size:.75rem}
-.chosen .rm{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;font-size:1rem}
-.chosen .none{border-style:dashed;color:var(--muted);justify-content:flex-start}
 label{display:block;font-weight:600;font-size:.9rem;margin-bottom:6px}
-input[type=text]{width:100%;font:inherit;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);margin-bottom:14px}
+input[type=text]{width:100%;font:inherit;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);margin-bottom:10px}
 input[type=text]:focus{border-color:var(--brand)}
-.hint{font-size:.78rem;color:var(--muted);margin:-8px 0 14px}
+input[readonly]{opacity:.8}
+.nikinfo{font-size:.82rem;color:var(--muted);margin:0 0 14px}
+.nikinfo.bad{color:var(--full-ink)}
+.need{font-weight:600;font-size:1.05rem;margin:18px 0 2px}
+.need-sub{font-size:.82rem;color:var(--muted);margin:0 0 12px}
+.weeks{list-style:none;margin:0 0 18px;padding:0;display:grid;gap:8px}
+.weeks li{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:.9rem}
+.weeks li.done{background:var(--ok);color:var(--ok-ink);border-color:transparent}
 .submit{width:100%;font:inherit;font-weight:600;padding:14px;border:0;border-radius:10px;background:var(--brand);color:var(--brand-ink);cursor:pointer}
 .submit:disabled{opacity:.5;cursor:not-allowed}
 .msg{margin-top:14px;padding:11px 14px;border-radius:10px;font-size:.9rem;display:none}
@@ -69,8 +69,8 @@ input[type=text]:focus{border-color:var(--brand)}
 <body>
 <div class="wrap">
   <h1>Jadwal Work From Office</h1>
-  <p class="lead">Isi NIK untuk melihat jumlah hari WFO yang wajib Anda pilih, lalu pilih tanggalnya di kalender. Kuota WFO maksimal 15 orang per hari.</p>
-  <div id="demo" class="demo" hidden>Mode demo: halaman belum terhubung ke Google Sheets, jadi data tidak tersimpan. Isi SCRIPT_URL di bagian atas script untuk menghubungkannya. NIK uji coba untuk 1 hari WFO: 1001 sampai 1005.</div>
+  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO untuk satu bulan penuh di kalender. Setiap minggu wajib memilih 2 hari WFO. Hanya NIK terdaftar yang bisa mengisi. Kuota WFO maksimal 15 orang per hari.</p>
+  <div id="demo" class="demo" hidden>Mode demo: halaman belum terhubung ke Google Sheets, jadi data tidak tersimpan. NIK uji coba: 1001–1005 dan 2001–2003. Isi SCRIPT_URL di bagian atas script untuk menghubungkannya.</div>
 
   <div class="grid">
     <section class="panel" aria-label="Kalender">
@@ -90,17 +90,17 @@ input[type=text]:focus{border-color:var(--brand)}
     </section>
 
     <section class="panel" aria-label="Formulir">
-      <label for="nama">Nama</label>
-      <input type="text" id="nama" autocomplete="off" maxlength="60" placeholder="Nama lengkap">
       <label for="nik">NIK</label>
       <input type="text" id="nik" autocomplete="off" maxlength="20" placeholder="Nomor induk karyawan">
-      <p class="hint">Huruf dan angka, 4–20 karakter.</p>
+      <label for="nama">Nama</label>
+      <input type="text" id="nama" readonly placeholder="Terisi otomatis setelah NIK diisi">
+      <p class="nikinfo" id="nikInfo"></p>
 
-      <p class="need" id="need"></p>
+      <p class="need" id="needTitle"></p>
       <p class="need-sub" id="needSub"></p>
-      <ul class="chosen" id="chosen"></ul>
+      <ul class="weeks" id="weeks"></ul>
 
-      <button class="submit" id="submit" disabled>Simpan jadwal WFO</button>
+      <button class="submit" id="submit" disabled>Simpan jadwal</button>
       <div class="msg" id="msg" role="status" aria-live="polite"></div>
     </section>
   </div>
@@ -108,83 +108,139 @@ input[type=text]:focus{border-color:var(--brand)}
 
 <script>
 /* ====== PENGATURAN ====== */
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwKdmALfQ6sPUBJIDo6EJJkqyMlMYN3iGILUO3rDSnB3DnJxj2Ey6wHxU_DAooaEpIXOQ/exec";   // tempel URL Web App Google Apps Script di sini
-const MAX_QUOTA  = 15;   // harus sama dengan MAX_QUOTA di Code.gs
-const DEMO_NIK_1_HARI = ["1001","1002","1003","1004","1005"]; // hanya dipakai di mode demo
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwKdmALfQ6sPUBJIDo6EJJkqyMlMYN3iGILUO3rDSnB3DnJxj2Ey6wHxU_DAooaEpIXOQ/exec";     // tempel URL Web App Google Apps Script di sini
+const MAX_QUOTA  = 15;     // harus sama dengan MAX_QUOTA di Code.gs
+const BULAN_KE_DEPAN = 2;  // harus sama dengan BULAN_KE_DEPAN di Code.gs
 /* ======================== */
 
+// Data contoh hanya untuk mode demo (saat SCRIPT_URL kosong)
+const DEMO_KARYAWAN = {
+  "1001":{nama:"Ayu Lestari",tim:"Finance",hari:2},"1002":{nama:"Bagas Pratama",tim:"Finance",hari:2},
+  "1003":{nama:"Citra Dewi",tim:"HR",hari:2},"1004":{nama:"Dimas Putra",tim:"IT",hari:2},"1005":{nama:"Eka Wulandari",tim:"IT",hari:2},
+  "2001":{nama:"Fajar Nugroho",tim:"Operasional",hari:2},"2002":{nama:"Gita Maharani",tim:"Marketing",hari:2},"2003":{nama:"Hendra Saputra",tim:"Operasional",hari:2}
+};
+
 const MONTHS=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+const SHORT=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
 const $=s=>document.querySelector(s);
 const pad=n=>String(n).padStart(2,"0");
 const keyOf=(y,m,d)=>`${y}-${pad(m+1)}-${pad(d)}`;
 const NIK_RE=/^[A-Z0-9]{4,20}$/;
+const nikVal=()=>$("#nik").value.trim().toUpperCase();
 
 const now=new Date();
 const todayKey=keyOf(now.getFullYear(),now.getMonth(),now.getDate());
 const minMonth=now.getFullYear()*12+now.getMonth();
+const maxMonth=minMonth+BULAN_KE_DEPAN;
 let viewY=now.getFullYear(), viewM=now.getMonth();
-let counts={}, selected=[], required=2, nikKnown=false, sending=false, lookupTimer=null;
+let countsByMonth={}, selByMonth={}, profile=null, nikMsg="", sending=false, lookupTimer=null;
 
-const DEMO=!SCRIPT_URL;
-if(DEMO){
-  $("#demo").hidden=false;
-  for(let i=1;i<40;i++){const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()+i);
-    counts[keyOf(d.getFullYear(),d.getMonth(),d.getDate())]=[3,9,12,15,6,14,0][i%7];}
+const ym=()=>`${viewY}-${pad(viewM+1)}`;
+const sel=()=>selByMonth[ym()]||(selByMonth[ym()]=[]);
+const counts=()=>countsByMonth[ym()]||{};
+
+/* ---------- mode demo ---------- */
+const DEMO=!SCRIPT_URL, demoStore={}, demoSaved={};
+if(DEMO)$("#demo").hidden=false;
+function demoCounts(my){
+  if(!demoStore[my]){
+    const [y,m]=my.split("-").map(Number), n=new Date(y,m,0).getDate(), c={};
+    for(let d=1;d<=n;d++)c[keyOf(y,m-1,d)]=[3,9,12,15,6,14,0][d%7];
+    demoStore[my]=c;
+  }
+  return demoStore[my];
+}
+function demoLookup(nik,my){
+  const k=DEMO_KARYAWAN[nik]; if(!k)return{terdaftar:false};
+  const saved=demoSaved[my+"|"+nik];
+  return{terdaftar:true,nama:k.nama,tim:k.tim,hari:k.hari,sudahIsi:!!saved,tanggal:saved||[]};
 }
 
+/* ---------- utilitas ---------- */
+async function api(p){return (await fetch(SCRIPT_URL+"?"+new URLSearchParams(p))).json();}
 function weekStart(k){
-  const [y,m,d]=k.split("-").map(Number);
-  const dt=new Date(Date.UTC(y,m-1,d,12));
+  const [y,m,d]=k.split("-").map(Number), dt=new Date(Date.UTC(y,m-1,d,12));
   dt.setUTCDate(dt.getUTCDate()-((dt.getUTCDay()+6)%7));
   return dt.toISOString().slice(0,10);
 }
 const longDate=k=>{const [y,m,d]=k.split("-").map(Number);
-  return new Date(y,m-1,d).toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"});};
+  return new Date(y,m-1,d).toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long"});};
+function showMsg(t,type){const m=$("#msg");m.textContent=t;m.className="msg show "+type;}
+function hideMsg(){$("#msg").className="msg";}
 
+/* ---------- aturan per minggu ---------- */
+function monthWeeks(){
+  const total=new Date(viewY,viewM+1,0).getDate(), c=counts(), map={};
+  for(let d=1;d<=total;d++){
+    if((new Date(viewY,viewM,d).getDay()+6)%7>=5)continue;   // lewati Sabtu & Minggu
+    const k=keyOf(viewY,viewM,d), ws=weekStart(k);
+    const w=map[ws]||(map[ws]={start:ws,eligible:[]});
+    if(k>=todayKey&&(c[k]||0)<MAX_QUOTA)w.eligible.push(k);
+  }
+  return Object.values(map);
+}
+const need=w=>profile?Math.min(profile.hari,w.eligible.length):0;
+const selectedIn=w=>sel().filter(k=>weekStart(k)===w.start);
+function complete(){
+  if(!profile||profile.sudahIsi)return false;
+  const ws=monthWeeks().filter(w=>need(w)>0);
+  return ws.length>0&&ws.every(w=>selectedIn(w).length===need(w));
+}
+function trimSelection(){
+  monthWeeks().forEach(w=>{
+    const r=need(w), arr=selectedIn(w);
+    if(arr.length>r){const drop=arr.slice(0,arr.length-r);selByMonth[ym()]=sel().filter(k=>!drop.includes(k));}
+  });
+}
+
+/* ---------- data dari server ---------- */
 async function loadCounts(){
-  if(DEMO){render();return;}
+  const my=ym();
   try{
-    const j=await (await fetch(SCRIPT_URL+"?action=counts")).json();
-    if(j.ok)counts=j.counts;
-  }catch(e){showMsg("Gagal memuat data kuota. Muat ulang halaman.","bad");}
+    let c;
+    if(DEMO)c=demoCounts(my);
+    else{const j=await api({action:"counts",bulan:my});if(!j.ok)throw new Error(j.error||"respon tidak valid");c=j.counts;}
+    countsByMonth[my]=c;
+  }catch(e){showMsg(`Gagal memuat data kuota (${e.message}).`,"bad");}
+  if(my===ym())render();
+}
+
+function clearProfile(){
+  if(profile&&profile.sudahIsi)selByMonth[ym()]=[];
+  profile=null;nikMsg="";$("#nama").value="";updatePanel();
+}
+function applyProfile(nik,r){
+  const wasSaved=profile&&profile.sudahIsi;
+  if(!r.terdaftar){clearProfile();nikMsg="NIK tidak terdaftar. Hubungi admin jika Anda seharusnya terdaftar.";render();return;}
+  profile={nik,nama:r.nama,tim:r.tim,hari:r.hari,sudahIsi:r.sudahIsi};
+  nikMsg="";$("#nama").value=r.nama;
+  if(r.sudahIsi)selByMonth[ym()]=r.tanggal||[];
+  else{if(wasSaved)selByMonth[ym()]=[];trimSelection();}
   render();
 }
-
-async function fetchRequired(nik){
-  if(DEMO)return DEMO_NIK_1_HARI.includes(nik)?1:2;
-  const j=await (await fetch(SCRIPT_URL+"?action=required&nik="+encodeURIComponent(nik))).json();
-  return j.ok?j.hari:2;
+async function lookup(){
+  const nik=nikVal(), my=ym();
+  if(!NIK_RE.test(nik)){clearProfile();return;}
+  try{
+    let r;
+    if(DEMO)r=demoLookup(nik,my);
+    else{r=await api({action:"nik",nik,bulan:my});if(!r.ok)throw new Error(r.error||"respon tidak valid");}
+    if(nik!==nikVal()||my!==ym())return;   // input atau bulan sudah berubah
+    applyProfile(nik,r);
+  }catch(e){nikMsg=`Gagal memeriksa NIK (${e.message}).`;updatePanel();}
 }
 
-function trimSelection(){
-  if(selected.length>required)selected=selected.slice(selected.length-required);
-}
-
-function onNikInput(){
-  clearTimeout(lookupTimer);
-  const nik=$("#nik").value.trim().toUpperCase();
-  if(!NIK_RE.test(nik)){nikKnown=false;required=2;updatePanel();return;}
-  lookupTimer=setTimeout(async()=>{
-    try{
-      const hari=await fetchRequired(nik);
-      if(nik!==$("#nik").value.trim().toUpperCase())return; // input sudah berubah
-      required=hari;nikKnown=true;trimSelection();render();
-    }catch(e){}
-  },400);
-}
-$("#nik").addEventListener("input",onNikInput);
-
+/* ---------- tampilan ---------- */
 function render(){
   $("#monthTitle").textContent=`${MONTHS[viewM]} ${viewY}`;
-  $("#prev").disabled=(viewY*12+viewM)<=minMonth;
-  const offset=(new Date(viewY,viewM,1).getDay()+6)%7;
-  const total=new Date(viewY,viewM+1,0).getDate();
+  const idx=viewY*12+viewM;
+  $("#prev").disabled=idx<=minMonth; $("#next").disabled=idx>=maxMonth;
+  const offset=(new Date(viewY,viewM,1).getDay()+6)%7, total=new Date(viewY,viewM+1,0).getDate(), c=counts(), s=sel();
   let html="";
   for(let i=0;i<offset;i++)html+='<span class="day empty"></span>';
   for(let d=1;d<=total;d++){
     const k=keyOf(viewY,viewM,d), dow=(offset+d-1)%7;
-    const weekend=dow>=5, past=k<todayKey, used=counts[k]||0, full=used>=MAX_QUOTA;
-    const isSel=selected.includes(k);
+    const weekend=dow>=5, past=k<todayKey, used=c[k]||0, full=used>=MAX_QUOTA, isSel=s.includes(k);
     let cls="", sub="", dis=false;
     if(weekend||past){cls="off";dis=true;}
     else if(full){cls="full";sub="Penuh";dis=true;}
@@ -197,74 +253,92 @@ function render(){
 }
 
 function updatePanel(){
-  $("#need").textContent=`Pilih ${required} hari WFO`;
-  $("#needSub").textContent=(nikKnown?"":"Isi NIK dulu agar jumlah hari sesuai. ")+
-    `${selected.length} dari ${required} tanggal dipilih.`+(required>1?" Semua tanggal harus dalam minggu yang sama.":"");
-  const list=[...selected].sort();
-  $("#chosen").innerHTML=list.length?list.map(k=>
-    `<li><span>${longDate(k)}<small>${counts[k]||0} dari ${MAX_QUOTA} kursi terisi</small></span><button class="rm" data-k="${k}" aria-label="Hapus ${longDate(k)}">✕</button></li>`
-  ).join(""):'<li class="none">Belum ada tanggal dipilih</li>';
-  $("#submit").disabled=sending||selected.length!==required;
+  $("#needTitle").textContent=`Jadwal WFO ${MONTHS[viewM]} ${viewY}`;
+  const info=$("#nikInfo");
+  if(profile){info.className="nikinfo";info.textContent=`Tim: ${profile.tim||"-"} · Wajib ${profile.hari} hari WFO per minggu`;}
+  else{info.className="nikinfo"+(nikMsg?" bad":"");info.textContent=nikMsg||"Nama dan tim terisi otomatis setelah NIK terdaftar diisi.";}
+
+  const list=$("#weeks"); let sub="";
+  if(!profile){sub="Isi NIK yang terdaftar untuk mulai memilih tanggal.";list.innerHTML="";}
+  else if(profile.sudahIsi){
+    sub="Jadwal bulan ini sudah tersimpan. Hubungi admin jika perlu diubah.";
+    list.innerHTML=[...sel()].sort().map(k=>`<li class="done"><span>${longDate(k)}</span><span>✓</span></li>`).join("");
+  }else{
+    const ws=monthWeeks().filter(w=>need(w)>0);
+    sub=ws.length?"Klik tanggal di kalender sesuai jumlah wajib tiap minggu. Pilihan baru menggantikan pilihan terlama di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
+    list.innerHTML=ws.map(w=>{
+      const n=selectedIn(w).length, r=need(w);
+      const a=Number(w.eligible[0].slice(8)), b=Number(w.eligible[w.eligible.length-1].slice(8));
+      return `<li class="${n===r?"done":""}"><span>${a===b?a:a+"–"+b} ${SHORT[viewM]}</span><span>${n} dari ${r} hari${n===r?" ✓":""}</span></li>`;
+    }).join("");
+  }
+  $("#needSub").textContent=sub;
+  $("#submit").disabled=sending||!complete();
+  $("#submit").textContent=sending?"Menyimpan...":`Simpan jadwal ${MONTHS[viewM]}`;
 }
 
-function showMsg(t,type){const m=$("#msg");m.textContent=t;m.className="msg show "+type;}
-function hideMsg(){$("#msg").className="msg";}
-
+/* ---------- interaksi ---------- */
 $("#days").addEventListener("click",e=>{
-  const b=e.target.closest(".day[data-k]"); if(!b||b.disabled)return;
-  const k=b.dataset.k; hideMsg();
-  if(selected.includes(k))selected=selected.filter(x=>x!==k);
-  else{selected.push(k);trimSelection();}   // jika melebihi, tanggal terlama diganti
+  const b=e.target.closest(".day[data-k]"); if(!b||b.disabled||sending)return;
+  const k=b.dataset.k;
+  if(!profile){showMsg(nikMsg||"Isi NIK yang terdaftar terlebih dahulu.","bad");return;}
+  if(profile.sudahIsi){showMsg("Jadwal bulan ini sudah tersimpan. Hubungi admin jika perlu diubah.","bad");return;}
+  hideMsg();
+  const s=sel();
+  if(s.includes(k))selByMonth[ym()]=s.filter(x=>x!==k);
+  else{
+    s.push(k);
+    const ws=weekStart(k), w=monthWeeks().find(x=>x.start===ws), inWeek=s.filter(x=>weekStart(x)===ws);
+    if(w&&inWeek.length>need(w)){const old=inWeek[0];selByMonth[ym()]=s.filter(x=>x!==old);}
+  }
   render();
 });
-$("#chosen").addEventListener("click",e=>{
-  const b=e.target.closest(".rm"); if(!b)return;
-  selected=selected.filter(x=>x!==b.dataset.k); hideMsg(); render();
+
+function go(delta){
+  if(sending)return;
+  const i=viewY*12+viewM+delta; if(i<minMonth||i>maxMonth)return;
+  viewY=Math.floor(i/12);viewM=i%12;hideMsg();
+  if(profile)profile.sudahIsi=false;   // status bulan baru diperiksa ulang oleh lookup()
+  render();loadCounts();
+  if(NIK_RE.test(nikVal()))lookup();
+}
+$("#prev").onclick=()=>go(-1);
+$("#next").onclick=()=>go(1);
+
+$("#nik").addEventListener("input",()=>{
+  clearTimeout(lookupTimer);
+  if(profile&&profile.nik!==nikVal())clearProfile();
+  else if(nikMsg){nikMsg="";updatePanel();}
+  lookupTimer=setTimeout(lookup,400);
 });
-$("#prev").onclick=()=>{viewM--;if(viewM<0){viewM=11;viewY--;}render();};
-$("#next").onclick=()=>{viewM++;if(viewM>11){viewM=0;viewY++;}render();};
 
 $("#submit").onclick=async()=>{
-  const nama=$("#nama").value.trim().replace(/\s+/g," ");
-  const nik=$("#nik").value.trim().toUpperCase();
-  if(nama.length<2)return showMsg("Isi nama dengan lengkap (minimal 2 karakter).","bad");
-  if(!NIK_RE.test(nik))return showMsg("NIK harus 4–20 karakter, hanya huruf dan angka.","bad");
-
-  sending=true; $("#submit").textContent="Menyimpan..."; updatePanel(); hideMsg();
+  if(!profile||!complete())return;
+  const tanggal=[...sel()].sort();
+  sending=true;hideMsg();updatePanel();
   try{
-    // pastikan jumlah hari sesuai NIK yang terakhir diisi
-    required=await fetchRequired(nik); nikKnown=true;
-    if(selected.length!==required){
-      showMsg(`NIK ini wajib memilih tepat ${required} hari WFO. Saat ini terpilih ${selected.length}.`,"bad");
-      trimSelection(); sending=false; $("#submit").textContent="Simpan jadwal WFO"; render(); return;
-    }
-    const tanggal=[...selected].sort();
-    if(tanggal.some(t=>weekStart(t)!==weekStart(tanggal[0]))){
-      showMsg("Semua tanggal harus berada dalam minggu yang sama.","bad");
-      sending=false; $("#submit").textContent="Simpan jadwal WFO"; render(); return;
-    }
     let res;
     if(DEMO){
       await new Promise(r=>setTimeout(r,500));
-      if(tanggal.some(t=>(counts[t]||0)>=MAX_QUOTA))res={ok:false,error:"Ada tanggal yang kuotanya sudah penuh."};
-      else{tanggal.forEach(t=>counts[t]=(counts[t]||0)+1);res={ok:true,message:`Jadwal tersimpan untuk ${tanggal.length} hari (mode demo).`};}
+      const c=demoCounts(ym());
+      if(tanggal.some(t=>(c[t]||0)>=MAX_QUOTA))res={ok:false,error:"Ada tanggal yang kuotanya sudah penuh."};
+      else{tanggal.forEach(t=>c[t]=(c[t]||0)+1);demoSaved[ym()+"|"+profile.nik]=tanggal;
+        res={ok:true,message:`Jadwal ${MONTHS[viewM]} tersimpan untuk ${tanggal.length} hari (mode demo).`};}
     }else{
-      const r=await fetch(SCRIPT_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({nama,nik,tanggal})});
+      const r=await fetch(SCRIPT_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({nik:profile.nik,tanggal})});
       res=await r.json();
     }
-    if(res.ok){
-      showMsg(res.message||"Jadwal WFO tersimpan.","good");
-      $("#nama").value="";$("#nik").value="";selected=[];required=2;nikKnown=false;
-    }else showMsg(res.error||"Gagal menyimpan jadwal.","bad");
+    if(res.ok){showMsg(res.message||"Jadwal WFO tersimpan.","good");profile.sudahIsi=true;}
+    else showMsg(res.error||"Gagal menyimpan jadwal.","bad");
     await loadCounts();
-    selected=selected.filter(k=>(counts[k]||0)<MAX_QUOTA);
+    if(!res.ok)selByMonth[ym()]=sel().filter(k=>(counts()[k]||0)<MAX_QUOTA);
   }catch(e){
-    showMsg("Tidak bisa terhubung ke server. Periksa koneksi lalu coba lagi.","bad");
+    showMsg(`Tidak bisa terhubung ke server (${e.message}).`,"bad");
   }
-  sending=false; $("#submit").textContent="Simpan jadwal WFO"; render();
+  sending=false;render();
 };
 
-render(); loadCounts();
+render();loadCounts();
 </script>
 </body>
 </html>
