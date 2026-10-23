@@ -69,7 +69,7 @@ input[readonly]{opacity:.8}
 <body>
 <div class="wrap">
   <h1>Jadwal Work From Office</h1>
-  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO untuk satu bulan penuh di kalender. Setiap minggu wajib memilih 2 hari WFO. Hanya NIK terdaftar yang bisa mengisi. Kuota WFO maksimal 15 orang per hari.</p>
+  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari itu otomatis terpilih dan tidak bisa diubah; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari.</p>
   <div id="demo" class="demo" hidden>Mode demo: halaman belum terhubung ke Google Sheets, jadi data tidak tersimpan. NIK uji coba: 1001–1005 dan 2001–2003. Isi SCRIPT_URL di bagian atas script untuk menghubungkannya.</div>
 
   <div class="grid">
@@ -115,9 +115,9 @@ const BULAN_KE_DEPAN = 2;  // harus sama dengan BULAN_KE_DEPAN di Code.gs
 
 // Data contoh hanya untuk mode demo (saat SCRIPT_URL kosong)
 const DEMO_KARYAWAN = {
-  "1001":{nama:"Ayu Lestari",tim:"Finance",hari:2},"1002":{nama:"Bagas Pratama",tim:"Finance",hari:2},
-  "1003":{nama:"Citra Dewi",tim:"HR",hari:2},"1004":{nama:"Dimas Putra",tim:"IT",hari:2},"1005":{nama:"Eka Wulandari",tim:"IT",hari:2},
-  "2001":{nama:"Fajar Nugroho",tim:"Operasional",hari:2},"2002":{nama:"Gita Maharani",tim:"Marketing",hari:2},"2003":{nama:"Hendra Saputra",tim:"Operasional",hari:2}
+  "1001":{nama:"Ayu Lestari",tim:"Finance",hari:2,wajibDay:null},"1002":{nama:"Bagas Pratama",tim:"Finance",hari:2,wajibDay:null},
+  "1003":{nama:"Citra Dewi",tim:"HR",hari:2,wajibDay:null},"1004":{nama:"Dimas Putra",tim:"IT",hari:2,wajibDay:null},"1005":{nama:"Eka Wulandari",tim:"IT",hari:2,wajibDay:null},
+  "2001":{nama:"Fajar Nugroho",tim:"Operasional",hari:2,wajibDay:null},"2002":{nama:"Gita Maharani",tim:"Marketing",hari:2,wajibDay:null},"2003":{nama:"Hendra Saputra",tim:"Operasional",hari:2,wajibDay:null}
 };
 
 const MONTHS=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
@@ -181,6 +181,24 @@ function monthWeeks(){
 }
 const need=w=>profile?Math.min(profile.hari,w.eligible.length):0;
 const selectedIn=w=>sel().filter(k=>weekStart(k)===w.start);
+function isRequiredDate(k){
+  if(!profile||profile.wajibDay===null||profile.wajibDay===undefined)return false;
+  const [y,m,d]=k.split("-").map(Number);
+  return k>=todayKey && new Date(y,m-1,d).getDay()===profile.wajibDay;
+}
+function requiredDates(){
+  if(!profile||profile.wajibDay===null||profile.wajibDay===undefined)return [];
+  const total=new Date(viewY,viewM+1,0).getDate(), out=[];
+  for(let d=1;d<=total;d++){
+    const k=keyOf(viewY,viewM,d);
+    if(isRequiredDate(k))out.push(k);
+  }
+  return out;
+}
+function ensureRequiredSelection(){
+  const req=requiredDates(), old=sel();
+  selByMonth[ym()]=[...new Set([...req,...old])].sort();
+}
 function isLastWeek(w){
   const lastDay=keyOf(viewY,viewM,new Date(viewY,viewM+1,0).getDate());
   return w.start===weekStart(lastDay);
@@ -189,12 +207,18 @@ function complete(){
   if(!profile||profile.sudahIsi)return false;
   // Minggu terakhir boleh kurang dari 2 hari; minggu lainnya tetap wajib.
   const ws=monthWeeks().filter(w=>need(w)>0&&!isLastWeek(w));
-  return sel().length>0&&ws.every(w=>selectedIn(w).length===need(w));
+  const req=requiredDates();
+  if(req.some(k=>(counts()[k]||0)>=MAX_QUOTA))return false;
+  return sel().length>0&&req.every(k=>sel().includes(k))&&ws.every(w=>selectedIn(w).length===need(w));
 }
 function trimSelection(){
   monthWeeks().forEach(w=>{
     const r=need(w), arr=selectedIn(w);
-    if(arr.length>r){const drop=arr.slice(0,arr.length-r);selByMonth[ym()]=sel().filter(k=>!drop.includes(k));}
+    if(arr.length>r){
+      const optional=arr.filter(k=>!isRequiredDate(k));
+      const drop=optional.slice(0,Math.max(0,arr.length-r));
+      if(drop.length)selByMonth[ym()]=sel().filter(k=>!drop.includes(k));
+    }
   });
 }
 
@@ -211,16 +235,16 @@ async function loadCounts(){
 }
 
 function clearProfile(){
-  if(profile&&profile.sudahIsi)selByMonth[ym()]=[];
+  if(profile)selByMonth[ym()]=[];
   profile=null;nikMsg="";$("#nama").value="";updatePanel();
 }
 function applyProfile(nik,r){
   const wasSaved=profile&&profile.sudahIsi;
   if(!r.terdaftar){clearProfile();nikMsg="NIK tidak terdaftar. Hubungi admin jika Anda seharusnya terdaftar.";render();return;}
-  profile={nik,nama:r.nama,tim:r.tim,hari:r.hari,sudahIsi:r.sudahIsi};
+  profile={nik,nama:r.nama,tim:r.tim,hari:r.hari,wajibDay:r.wajibDay===undefined?null:r.wajibDay,wajibText:r.wajibText||"",sudahIsi:r.sudahIsi};
   nikMsg="";$("#nama").value=r.nama;
   if(r.sudahIsi)selByMonth[ym()]=r.tanggal||[];
-  else{if(wasSaved)selByMonth[ym()]=[];trimSelection();}
+  else{if(wasSaved)selByMonth[ym()]=[];ensureRequiredSelection();trimSelection();}
   render();
 }
 async function lookup(){
@@ -245,12 +269,13 @@ function render(){
   for(let i=0;i<offset;i++)html+='<span class="day empty"></span>';
   for(let d=1;d<=total;d++){
     const k=keyOf(viewY,viewM,d), dow=(offset+d-1)%7;
-    const weekend=dow>=5, past=k<todayKey, used=c[k]||0, full=used>=MAX_QUOTA, isSel=s.includes(k);
+    const weekend=dow>=5, past=k<todayKey, used=c[k]||0, full=used>=MAX_QUOTA, required=isRequiredDate(k), isSel=s.includes(k)||required;
     let cls="", sub="", dis=false;
     if(weekend||past){cls="off";dis=true;}
     else if(full){cls="full";sub="Penuh";dis=true;}
     else{cls=used>=10?"warn":"ok";sub=`${used}/${MAX_QUOTA}`;}
-    if(isSel){cls+=" sel";dis=false;}
+    if(required){cls="sel";sub=full?"Wajib · Penuh":"Wajib";dis=true;}
+    else if(isSel){cls+=" sel";dis=false;}
     html+=`<button class="day ${cls}" data-k="${k}" ${dis?"disabled":""} aria-label="${d} ${MONTHS[viewM]}${sub?", terisi "+sub:""}" aria-pressed="${isSel}"><b>${d}</b><small>${sub}</small></button>`;
   }
   $("#days").innerHTML=html;
@@ -260,7 +285,10 @@ function render(){
 function updatePanel(){
   $("#needTitle").textContent=`Jadwal WFO ${MONTHS[viewM]} ${viewY}`;
   const info=$("#nikInfo");
-  if(profile){info.className="nikinfo";info.textContent=`Tim: ${profile.tim||"-"} · Wajib ${profile.hari} hari WFO per minggu`;}
+  if(profile){
+    info.className="nikinfo";
+    info.textContent=`Tim: ${profile.tim||"-"} · ${profile.wajibDay!==null&&profile.wajibDay!==undefined?`Hari wajib: ${profile.wajibText||["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"][profile.wajibDay]}. Pilih 1 hari tambahan per minggu.`:`Wajib 2 hari WFO per minggu.`}`;
+  }
   else{info.className="nikinfo"+(nikMsg?" bad":"");info.textContent=nikMsg||"Nama dan tim terisi otomatis setelah NIK terdaftar diisi.";}
 
   const list=$("#weeks"); let sub="";
@@ -270,7 +298,7 @@ function updatePanel(){
     list.innerHTML=[...sel()].sort().map(k=>`<li class="done"><span>${longDate(k)}</span><span>✓</span></li>`).join("");
   }else{
     const ws=monthWeeks().filter(w=>need(w)>0);
-    sub=ws.length?"Pilih sesuai kewajiban 2 hari pada setiap minggu. Minggu terakhir bulan fleksibel dan boleh memilih kurang dari 2 hari. Pilihan baru menggantikan pilihan terlama di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
+    sub=ws.length?(profile.wajibDay!==null&&profile.wajibDay!==undefined?"Hari wajib otomatis terpilih dan terkunci; pilih 1 hari tambahan per minggu. Minggu terakhir fleksibel dan boleh memilih kurang dari 2 hari total.":"Pilih 2 hari WFO setiap minggu. Minggu terakhir bulan fleksibel dan boleh memilih kurang dari 2 hari.")+" Pilihan baru menggantikan pilihan terlama yang bisa diubah di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
     list.innerHTML=ws.map(w=>{
       const n=selectedIn(w).length, r=need(w);
       const a=Number(w.eligible[0].slice(8)), b=Number(w.eligible[w.eligible.length-1].slice(8));
@@ -290,6 +318,7 @@ $("#days").addEventListener("click",e=>{
   const b=e.target.closest(".day[data-k]"); if(!b||b.disabled||sending)return;
   const k=b.dataset.k;
   if(!profile){showMsg(nikMsg||"Isi NIK yang terdaftar terlebih dahulu.","bad");return;}
+  if(isRequiredDate(k)){showMsg("Tanggal ini adalah hari wajib WFO dan tidak bisa diubah.","bad");return;}
   if(profile.sudahIsi){showMsg("Jadwal bulan ini sudah tersimpan. Hubungi admin jika perlu diubah.","bad");return;}
   hideMsg();
   const s=sel();
@@ -297,7 +326,10 @@ $("#days").addEventListener("click",e=>{
   else{
     s.push(k);
     const ws=weekStart(k), w=monthWeeks().find(x=>x.start===ws), inWeek=s.filter(x=>weekStart(x)===ws);
-    if(w&&inWeek.length>need(w)){const old=inWeek[0];selByMonth[ym()]=s.filter(x=>x!==old);}
+    if(w&&inWeek.length>need(w)){
+      const old=inWeek.find(x=>!isRequiredDate(x));
+      if(old)selByMonth[ym()]=s.filter(x=>x!==old);
+    }
   }
   render();
 });
@@ -307,6 +339,7 @@ function go(delta){
   const i=viewY*12+viewM+delta; if(i<minMonth||i>maxMonth)return;
   viewY=Math.floor(i/12);viewM=i%12;hideMsg();
   if(profile)profile.sudahIsi=false;   // status bulan baru diperiksa ulang oleh lookup()
+  if(profile&&!profile.sudahIsi)ensureRequiredSelection();
   render();loadCounts();
   if(NIK_RE.test(nikVal()))lookup();
 }
