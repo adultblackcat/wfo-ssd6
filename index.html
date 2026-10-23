@@ -181,10 +181,15 @@ function monthWeeks(){
 }
 const need=w=>profile?Math.min(profile.hari,w.eligible.length):0;
 const selectedIn=w=>sel().filter(k=>weekStart(k)===w.start);
+function isLastWeek(w){
+  const lastDay=keyOf(viewY,viewM,new Date(viewY,viewM+1,0).getDate());
+  return w.start===weekStart(lastDay);
+}
 function complete(){
   if(!profile||profile.sudahIsi)return false;
-  const ws=monthWeeks().filter(w=>need(w)>0);
-  return ws.length>0&&ws.every(w=>selectedIn(w).length===need(w));
+  // Minggu terakhir boleh kurang dari 2 hari; minggu lainnya tetap wajib.
+  const ws=monthWeeks().filter(w=>need(w)>0&&!isLastWeek(w));
+  return sel().length>0&&ws.every(w=>selectedIn(w).length===need(w));
 }
 function trimSelection(){
   monthWeeks().forEach(w=>{
@@ -265,10 +270,13 @@ function updatePanel(){
     list.innerHTML=[...sel()].sort().map(k=>`<li class="done"><span>${longDate(k)}</span><span>✓</span></li>`).join("");
   }else{
     const ws=monthWeeks().filter(w=>need(w)>0);
-    sub=ws.length?"Klik tanggal di kalender sesuai jumlah wajib tiap minggu. Pilihan baru menggantikan pilihan terlama di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
+    sub=ws.length?"Pilih sesuai kewajiban 2 hari pada setiap minggu. Minggu terakhir bulan fleksibel dan boleh memilih kurang dari 2 hari. Pilihan baru menggantikan pilihan terlama di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
     list.innerHTML=ws.map(w=>{
       const n=selectedIn(w).length, r=need(w);
       const a=Number(w.eligible[0].slice(8)), b=Number(w.eligible[w.eligible.length-1].slice(8));
+      if(isLastWeek(w)){
+        return `<li class="${n>0?"done":""}"><span>${a===b?a:a+"–"+b} ${SHORT[viewM]} · Minggu terakhir</span><span>${n} hari · fleksibel</span></li>`;
+      }
       return `<li class="${n===r?"done":""}"><span>${a===b?a:a+"–"+b} ${SHORT[viewM]}</span><span>${n} dari ${r} hari${n===r?" ✓":""}</span></li>`;
     }).join("");
   }
