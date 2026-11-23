@@ -69,7 +69,7 @@ input[readonly]{opacity:.8}
 <body>
 <div class="wrap">
   <h1>Jadwal Work From Office</h1>
-  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari itu otomatis terpilih dan tidak bisa diubah; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 Desember 2026).</p>
+  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari wajib otomatis bergeser 1 hari setiap bulan (Senin→Selasa→...→Jumat→Senin) dan terkunci otomatis; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 Desember 2026).</p>
   <div id="demo" class="demo" hidden>Mode demo: halaman belum terhubung ke Google Sheets, jadi data tidak tersimpan. NIK uji coba: 1001–1005 dan 2001–2003. Isi SCRIPT_URL di bagian atas script untuk menghubungkannya.</div>
 
   <div class="grid">
@@ -109,9 +109,38 @@ input[readonly]{opacity:.8}
 <script>
 /* ====== PENGATURAN ====== */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwKdmALfQ6sPUBJIDo6EJJkqyMlMYN3iGILUO3rDSnB3DnJxj2Ey6wHxU_DAooaEpIXOQ/exec";     // tempel URL Web App Google Apps Script di sini
-const MAX_QUOTA  = 15;     // harus sama dengan MAX_QUOTA di Code.gs
-const BULAN_KE_DEPAN = 2;  // harus sama dengan BULAN_KE_DEPAN di Code.gs
+const MAX_QUOTA  = 15;          // harus sama dengan MAX_QUOTA di Code.gs
+const BULAN_KE_DEPAN = 2;       // harus sama dengan BULAN_KE_DEPAN di Code.gs
+const BASE_WAJIB_MONTH = "2026-11"; // bulan acuan awal kolom Wajib di Data Karyawan (harus sama dengan Code.gs)
 /* ======================== */
+
+const HARI_NAMA = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
+
+function monthIdxFromYm(monthYm){
+  const [y,m]=monthYm.split("-").map(Number);
+  return y*12+(m-1);
+}
+
+// Geser hari wajib (1=Senin..5=Jumat) berdasarkan selisih bulan dari BASE_WAJIB_MONTH.
+// Setiap maju 1 bulan, hari wajib bergeser 1 hari (Senin->Selasa->Rabu->Kamis->Jumat->Senin).
+function shiftWeekday(baseDay, monthYm){
+  if(baseDay===null||baseDay===undefined)return null;
+  const diff=monthIdxFromYm(monthYm)-monthIdxFromYm(BASE_WAJIB_MONTH);
+  const idx0=(((baseDay-1)+diff)%5+5)%5;
+  return idx0+1;
+}
+
+function prevMonthYm(monthYm){
+  const [y,m]=monthYm.split("-").map(Number);
+  return m===1?`${y-1}-12`:`${y}-${pad(m-1)}`;
+}
+
+// Cek apakah tanggal 1 bulan (monthYm) bukan Senin (Selasa-Jumat)
+function isFirstWeekSplit(monthYm){
+  const [y,m]=monthYm.split("-").map(Number);
+  const firstDow=new Date(y,m-1,1).getDay(); // 0=Min, 1=Sen, 2=Sel..5=Jum, 6=Sab
+  return firstDow>=2&&firstDow<=5;
+}
 
 // Kuota khusus per tanggal (21-24 Desember 2026 maksimal 17 orang)
 function getMaxQuota(k){
@@ -119,12 +148,17 @@ function getMaxQuota(k){
 }
 
 // Target hari WFO per minggu:
-// Minggu pertama Des 2026 (ws === "2026-11-30"):
-// - Jika hari wajib karyawan jatuh pada Senin 30 Nov 2026 (wajibDay === 1), cukup pilih 1 hari di Des (1-4 Des).
-// - Selain itu (hari wajib mulai 1 Des atau tanpa hari wajib), tetap 2 hari.
-function targetHariMinggu(ws, prof){
+// Jika tanggal 1 bulan bukan Senin (Sel-Jum), minggu pertama mengikuti jadwal wajib bulan sebelumnya.
+// Jika hari wajib bulan sebelumnya jatuh sebelum tanggal 1 (di akhir bulan lalu), maka di bulan berjalan cukup pilih 1 hari.
+function targetHariMinggu(ws, monthYm, prof){
   if(!prof)return 0;
-  if(ws==="2026-11-30" && prof.wajibDay===1)return 1;
+  const firstWs=weekStart(monthYm+"-01");
+  if(ws===firstWs && isFirstWeekSplit(monthYm) && prof.baseWajibDay!==null && prof.baseWajibDay!==undefined){
+    const prevWajib=shiftWeekday(prof.baseWajibDay, prevMonthYm(monthYm));
+    const [y,m]=monthYm.split("-").map(Number);
+    const firstDow=new Date(y,m-1,1).getDay();
+    if(prevWajib<firstDow)return 1;
+  }
   return prof.hari;
 }
 
@@ -199,15 +233,30 @@ function monthWeeks(){
   }
   return Object.values(map);
 }
-const need=w=>profile?Math.min(targetHariMinggu(w.start,profile),w.eligible.length):0;
+const need=w=>profile?Math.min(targetHariMinggu(w.start,ym(),profile),w.eligible.length):0;
 const selectedIn=w=>sel().filter(k=>weekStart(k)===w.start);
+
+// Hari wajib efektif untuk tanggal k:
+// Jika k berada di minggu pertama bulan yang tanggal 1-nya bukan Senin, gunakan hari wajib bulan sebelumnya.
+// Minggu kedua hingga akhir bulan gunakan hari wajib bulan berjalan (hasil rotasi).
+function effectiveWajibDayForDate(k){
+  if(!profile||profile.baseWajibDay===null||profile.baseWajibDay===undefined)return null;
+  const monthYm=k.slice(0,7);
+  const firstWs=weekStart(monthYm+"-01");
+  if(weekStart(k)===firstWs && isFirstWeekSplit(monthYm)){
+    return shiftWeekday(profile.baseWajibDay, prevMonthYm(monthYm));
+  }
+  return shiftWeekday(profile.baseWajibDay, monthYm);
+}
+
 function isRequiredDate(k){
-  if(!profile||profile.wajibDay===null||profile.wajibDay===undefined)return false;
+  const reqDow=effectiveWajibDayForDate(k);
+  if(reqDow===null)return false;
   const [y,m,d]=k.split("-").map(Number);
-  return k>=todayKey && new Date(y,m-1,d).getDay()===profile.wajibDay;
+  return k>=todayKey && new Date(y,m-1,d).getDay()===reqDow;
 }
 function requiredDates(){
-  if(!profile||profile.wajibDay===null||profile.wajibDay===undefined)return [];
+  if(!profile||profile.baseWajibDay===null||profile.baseWajibDay===undefined)return [];
   const total=new Date(viewY,viewM+1,0).getDate(), out=[];
   for(let d=1;d<=total;d++){
     const k=keyOf(viewY,viewM,d);
@@ -260,7 +309,8 @@ function clearProfile(){
 function applyProfile(nik,r){
   const wasSaved=profile&&profile.sudahIsi;
   if(!r.terdaftar){clearProfile();nikMsg="NIK tidak terdaftar. Hubungi admin jika Anda seharusnya terdaftar.";render();return;}
-  profile={nik,nama:r.nama,tim:r.tim,hari:r.hari,wajibDay:r.wajibDay===undefined?null:r.wajibDay,wajibText:r.wajibText||"",sudahIsi:r.sudahIsi};
+  const baseWajib=(r.baseWajibDay!==undefined&&r.baseWajibDay!==null)?r.baseWajibDay:(r.wajibDay===undefined?null:r.wajibDay);
+  profile={nik,nama:r.nama,tim:r.tim,hari:r.hari,baseWajibDay:baseWajib,wajibText:r.wajibText||"",sudahIsi:r.sudahIsi};
   nikMsg="";$("#nama").value=r.nama;
   if(r.sudahIsi)selByMonth[ym()]=r.tanggal||[];
   else{if(wasSaved)selByMonth[ym()]=[];ensureRequiredSelection();trimSelection();}
@@ -306,9 +356,15 @@ function updatePanel(){
   const info=$("#nikInfo");
   if(profile){
     info.className="nikinfo";
-    const isDecSenin=ym()==="2026-12"&&profile.wajibDay===1;
-    const decNote=isDecSenin?" (1–4 Des cukup 1 hari karena wajib Senin 30 Nov)":"";
-    info.textContent=`Tim: ${profile.tim||"-"} · ${profile.wajibDay!==null&&profile.wajibDay!==undefined?`Hari wajib: ${profile.wajibText||["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"][profile.wajibDay]}. Pilih 1 hari tambahan per minggu${decNote}.`:`Wajib 2 hari WFO per minggu.`}`;
+    const my=ym();
+    if(profile.baseWajibDay!==null&&profile.baseWajibDay!==undefined){
+      const currWajib=shiftWeekday(profile.baseWajibDay,my);
+      const prevWajib=shiftWeekday(profile.baseWajibDay,prevMonthYm(my));
+      const splitNote=isFirstWeekSplit(my)?` (minggu ke-1 ikut bulan lalu: ${HARI_NAMA[prevWajib]})`:"";
+      info.textContent=`Tim: ${profile.tim||"-"} · Hari wajib bulan ini: ${HARI_NAMA[currWajib]}${splitNote}.`;
+    }else{
+      info.textContent=`Tim: ${profile.tim||"-"} · Wajib 2 hari WFO per minggu.`;
+    }
   }
   else{info.className="nikinfo"+(nikMsg?" bad":"");info.textContent=nikMsg||"Nama dan tim terisi otomatis setelah NIK terdaftar diisi.";}
 
@@ -319,8 +375,9 @@ function updatePanel(){
     list.innerHTML=[...sel()].sort().map(k=>`<li class="done"><span>${longDate(k)}</span><span>✓</span></li>`).join("");
   }else{
     const ws=monthWeeks().filter(w=>need(w)>0);
-    const isDecSenin=ym()==="2026-12"&&profile.wajibDay===1;
-    sub=ws.length?(profile.wajibDay!==null&&profile.wajibDay!==undefined?`Hari wajib otomatis terpilih dan terkunci; pilih 1 hari tambahan per minggu${isDecSenin?" (1–4 Des pilih 1 hari karena wajib jatuh di 30 Nov)":""}. Minggu terakhir fleksibel.`:"Pilih 2 hari WFO setiap minggu. Minggu terakhir bulan fleksibel dan boleh memilih kurang dari 2 hari.")+" Pilihan baru menggantikan pilihan terlama yang bisa diubah di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
+    const my=ym();
+    const split=isFirstWeekSplit(my)&&profile.baseWajibDay!==null&&profile.baseWajibDay!==undefined;
+    sub=ws.length?(profile.baseWajibDay!==null&&profile.baseWajibDay!==undefined?`Hari wajib otomatis terpilih dan terkunci${split?" (minggu ke-1 mengikuti jadwal wajib bulan lalu)":""}; pilih 1 hari tambahan per minggu. Minggu terakhir fleksibel.`:"Pilih 2 hari WFO setiap minggu. Minggu terakhir bulan fleksibel dan boleh memilih kurang dari 2 hari.")+" Pilihan baru menggantikan pilihan terlama yang bisa diubah di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
     list.innerHTML=ws.map(w=>{
       const n=selectedIn(w).length, r=need(w);
       const a=Number(w.eligible[0].slice(8)), b=Number(w.eligible[w.eligible.length-1].slice(8));
@@ -361,7 +418,11 @@ function go(delta){
   const i=viewY*12+viewM+delta; if(i<minMonth||i>maxMonth)return;
   viewY=Math.floor(i/12);viewM=i%12;hideMsg();
   if(profile)profile.sudahIsi=false;
-  if(profile&&!profile.sudahIsi){ensureRequiredSelection();trimSelection();}
+  if(profile&&!profile.sudahIsi){
+    selByMonth[ym()]=sel().filter(k=>!isRequiredDate(k));
+    ensureRequiredSelection();
+    trimSelection();
+  }
   render();loadCounts();
   if(NIK_RE.test(nikVal()))lookup();
 }
