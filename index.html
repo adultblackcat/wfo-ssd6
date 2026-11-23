@@ -43,7 +43,7 @@ h1{font-size:clamp(1.8rem,4vw,2.6rem);font-weight:800;letter-spacing:-.02em;marg
 .day.off{background:transparent;color:var(--muted);opacity:.45;cursor:not-allowed}
 .day.empty{visibility:hidden}
 .day.sel{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
-.day:disabled{cursor:not-allowed}
+.day:disabled{cursor-not-allowed}
 :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;font-size:.8rem;color:var(--muted)}
 .legend i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:6px;vertical-align:-1px}
@@ -69,7 +69,7 @@ input[readonly]{opacity:.8}
 <body>
 <div class="wrap">
   <h1>Jadwal Work From Office</h1>
-  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari itu otomatis terpilih dan tidak bisa diubah; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Khusus 1–4 Desember 2026 cukup 1 hari WFO, dan minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (khusus 21–24 Desember 2026 maksimal 17 orang per hari).</p>
+  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari itu otomatis terpilih dan tidak bisa diubah; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 Desember 2026).</p>
   <div id="demo" class="demo" hidden>Mode demo: halaman belum terhubung ke Google Sheets, jadi data tidak tersimpan. NIK uji coba: 1001–1005 dan 2001–2003. Isi SCRIPT_URL di bagian atas script untuk menghubungkannya.</div>
 
   <div class="grid">
@@ -113,9 +113,19 @@ const MAX_QUOTA  = 15;     // harus sama dengan MAX_QUOTA di Code.gs
 const BULAN_KE_DEPAN = 2;  // harus sama dengan BULAN_KE_DEPAN di Code.gs
 /* ======================== */
 
-// Kuota khusus per tanggal (21-24 Desember 2026 = 17 orang)
-function quotaFor(k){
-  return (k>="2026-12-21" && k<="2026-12-24") ? 17 : MAX_QUOTA;
+// Kuota khusus per tanggal (21-24 Desember 2026 maksimal 17 orang)
+function getMaxQuota(k){
+  return (k>="2026-12-21"&&k<="2026-12-24")?17:MAX_QUOTA;
+}
+
+// Target hari WFO per minggu:
+// Minggu pertama Des 2026 (ws === "2026-11-30"):
+// - Jika hari wajib karyawan jatuh pada Senin 30 Nov 2026 (wajibDay === 1), cukup pilih 1 hari di Des (1-4 Des).
+// - Selain itu (hari wajib mulai 1 Des atau tanpa hari wajib), tetap 2 hari.
+function targetHariMinggu(ws, prof){
+  if(!prof)return 0;
+  if(ws==="2026-11-30" && prof.wajibDay===1)return 1;
+  return prof.hari;
 }
 
 // Data contoh hanya untuk mode demo (saat SCRIPT_URL kosong)
@@ -143,7 +153,6 @@ let countsByMonth={}, selByMonth={}, profile=null, nikMsg="", sending=false, loo
 const ym=()=>`${viewY}-${pad(viewM+1)}`;
 const sel=()=>selByMonth[ym()]||(selByMonth[ym()]=[]);
 const counts=()=>countsByMonth[ym()]||{};
-
 function effectiveCount(k){
   const n=Number(counts()[k]||0);
   if(profile&&!profile.sudahIsi&&isRequiredDate(k))return Math.max(0,n-1);
@@ -164,7 +173,7 @@ function demoCounts(my){
 function demoLookup(nik,my){
   const k=DEMO_KARYAWAN[nik]; if(!k)return{terdaftar:false};
   const saved=demoSaved[my+"|"+nik];
-  return{terdaftar:true,nama:k.nama,tim:k.tim,hari:k.hari,sudahIsi:!!saved,tanggal:saved||[]};
+  return{terdaftar:true,nama:k.nama,tim:k.tim,hari:k.hari,wajibDay:k.wajibDay,sudahIsi:!!saved,tanggal:saved||[]};
 }
 
 /* ---------- utilitas ---------- */
@@ -186,16 +195,11 @@ function monthWeeks(){
     if((new Date(viewY,viewM,d).getDay()+6)%7>=5)continue;   // lewati Sabtu & Minggu
     const k=keyOf(viewY,viewM,d), ws=weekStart(k);
     const w=map[ws]||(map[ws]={start:ws,eligible:[]});
-    if(k>=todayKey&&effectiveCount(k)<quotaFor(k))w.eligible.push(k);
+    if(k>=todayKey&&effectiveCount(k)<getMaxQuota(k))w.eligible.push(k);
   }
   return Object.values(map);
 }
-function need(w){
-  if(!profile)return 0;
-  // Khusus minggu pertama Desember 2026 (1-4 Des 2026, weekStart = 2026-11-30) cukup 1 hari WFO
-  const baseHari=(ym()==="2026-12" && w.start==="2026-11-30") ? 1 : profile.hari;
-  return Math.min(baseHari,w.eligible.length);
-}
+const need=w=>profile?Math.min(targetHariMinggu(w.start,profile),w.eligible.length):0;
 const selectedIn=w=>sel().filter(k=>weekStart(k)===w.start);
 function isRequiredDate(k){
   if(!profile||profile.wajibDay===null||profile.wajibDay===undefined)return false;
@@ -223,7 +227,7 @@ function complete(){
   if(!profile||profile.sudahIsi)return false;
   const ws=monthWeeks().filter(w=>need(w)>0&&!isLastWeek(w));
   const req=requiredDates();
-  if(req.some(k=>effectiveCount(k)>=quotaFor(k)))return false;
+  if(req.some(k=>effectiveCount(k)>=getMaxQuota(k)))return false;
   return sel().length>0&&req.every(k=>sel().includes(k))&&ws.every(w=>selectedIn(w).length===need(w));
 }
 function trimSelection(){
@@ -283,12 +287,12 @@ function render(){
   let html="";
   for(let i=0;i<offset;i++)html+='<span class="day empty"></span>';
   for(let d=1;d<=total;d++){
-    const k=keyOf(viewY,viewM,d), dow=(offset+d-1)%7, maxQ=quotaFor(k);
-    const weekend=dow>=5, past=k<todayKey, used=c[k]||0, full=used>=maxQ, required=isRequiredDate(k), isSel=s.includes(k)||required;
+    const k=keyOf(viewY,viewM,d), dow=(offset+d-1)%7, quota=getMaxQuota(k);
+    const weekend=dow>=5, past=k<todayKey, used=c[k]||0, full=used>=quota, required=isRequiredDate(k), isSel=s.includes(k)||required;
     let cls="", sub="", dis=false;
     if(weekend||past){cls="off";dis=true;}
     else if(full){cls="full";sub="Penuh";dis=true;}
-    else{cls=used>=(maxQ-5)?"warn":"ok";sub=`${used}/${maxQ}`;}
+    else{cls=used>=(quota-5)?"warn":"ok";sub=`${used}/${quota}`;}
     if(required){cls="sel";sub=full?"Wajib · Penuh":"Wajib";dis=true;}
     else if(isSel){cls+=" sel";dis=false;}
     html+=`<button class="day ${cls}" data-k="${k}" ${dis?"disabled":""} aria-label="${d} ${MONTHS[viewM]}${sub?", terisi "+sub:""}" aria-pressed="${isSel}"><b>${d}</b><small>${sub}</small></button>`;
@@ -302,7 +306,9 @@ function updatePanel(){
   const info=$("#nikInfo");
   if(profile){
     info.className="nikinfo";
-    info.textContent=`Tim: ${profile.tim||"-"} · ${profile.wajibDay!==null&&profile.wajibDay!==undefined?`Hari wajib: ${profile.wajibText||["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"][profile.wajibDay]}. Pilih 1 hari tambahan per minggu.`:`Wajib 2 hari WFO per minggu.`}`;
+    const isDecSenin=ym()==="2026-12"&&profile.wajibDay===1;
+    const decNote=isDecSenin?" (1–4 Des cukup 1 hari karena wajib Senin 30 Nov)":"";
+    info.textContent=`Tim: ${profile.tim||"-"} · ${profile.wajibDay!==null&&profile.wajibDay!==undefined?`Hari wajib: ${profile.wajibText||["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"][profile.wajibDay]}. Pilih 1 hari tambahan per minggu${decNote}.`:`Wajib 2 hari WFO per minggu.`}`;
   }
   else{info.className="nikinfo"+(nikMsg?" bad":"");info.textContent=nikMsg||"Nama dan tim terisi otomatis setelah NIK terdaftar diisi.";}
 
@@ -313,8 +319,8 @@ function updatePanel(){
     list.innerHTML=[...sel()].sort().map(k=>`<li class="done"><span>${longDate(k)}</span><span>✓</span></li>`).join("");
   }else{
     const ws=monthWeeks().filter(w=>need(w)>0);
-    const decNote=(ym()==="2026-12")?" Khusus 1–4 Desember cukup 1 hari WFO.":"";
-    sub=ws.length?(profile.wajibDay!==null&&profile.wajibDay!==undefined?"Hari wajib otomatis terpilih dan terkunci; pilih 1 hari tambahan per minggu."+decNote+" Minggu terakhir fleksibel dan boleh memilih kurang dari 2 hari total.":"Pilih 2 hari WFO setiap minggu."+decNote+" Minggu terakhir bulan fleksibel dan boleh memilih kurang dari 2 hari.")+" Pilihan baru menggantikan pilihan terlama yang bisa diubah di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
+    const isDecSenin=ym()==="2026-12"&&profile.wajibDay===1;
+    sub=ws.length?(profile.wajibDay!==null&&profile.wajibDay!==undefined?`Hari wajib otomatis terpilih dan terkunci; pilih 1 hari tambahan per minggu${isDecSenin?" (1–4 Des pilih 1 hari karena wajib jatuh di 30 Nov)":""}. Minggu terakhir fleksibel.`:"Pilih 2 hari WFO setiap minggu. Minggu terakhir bulan fleksibel dan boleh memilih kurang dari 2 hari.")+" Pilihan baru menggantikan pilihan terlama yang bisa diubah di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
     list.innerHTML=ws.map(w=>{
       const n=selectedIn(w).length, r=need(w);
       const a=Number(w.eligible[0].slice(8)), b=Number(w.eligible[w.eligible.length-1].slice(8));
@@ -344,7 +350,7 @@ $("#days").addEventListener("click",e=>{
     const ws=weekStart(k), w=monthWeeks().find(x=>x.start===ws), inWeek=s.filter(x=>weekStart(x)===ws);
     if(w&&inWeek.length>need(w)){
       const old=inWeek.find(x=>!isRequiredDate(x));
-      if(old)selByMonth[ym()]=s.filter(x=>!old.includes(x));
+      if(old)selByMonth[ym()]=s.filter(x=>x!==old);
     }
   }
   render();
@@ -355,7 +361,7 @@ function go(delta){
   const i=viewY*12+viewM+delta; if(i<minMonth||i>maxMonth)return;
   viewY=Math.floor(i/12);viewM=i%12;hideMsg();
   if(profile)profile.sudahIsi=false;
-  if(profile&&!profile.sudahIsi)ensureRequiredSelection();
+  if(profile&&!profile.sudahIsi){ensureRequiredSelection();trimSelection();}
   render();loadCounts();
   if(NIK_RE.test(nikVal()))lookup();
 }
@@ -378,7 +384,7 @@ $("#submit").onclick=async()=>{
     if(DEMO){
       await new Promise(r=>setTimeout(r,500));
       const c=demoCounts(ym());
-      if(tanggal.some(t=>(c[t]||0)>=quotaFor(t)))res={ok:false,error:"Ada tanggal yang kuotanya sudah penuh."};
+      if(tanggal.some(t=>(c[t]||0)>=getMaxQuota(t)))res={ok:false,error:"Ada tanggal yang kuotanya sudah penuh."};
       else{tanggal.forEach(t=>c[t]=(c[t]||0)+1);demoSaved[ym()+"|"+profile.nik]=tanggal;
         res={ok:true,message:`Jadwal ${MONTHS[viewM]} tersimpan untuk ${tanggal.length} hari (mode demo).`};}
     }else{
@@ -388,7 +394,7 @@ $("#submit").onclick=async()=>{
     if(res.ok){showMsg(res.message||"Jadwal WFO tersimpan.","good");profile.sudahIsi=true;}
     else showMsg(res.error||"Gagal menyimpan jadwal.","bad");
     await loadCounts();
-    if(!res.ok)selByMonth[ym()]=sel().filter(k=>(counts()[k]||0)<quotaFor(k));
+    if(!res.ok)selByMonth[ym()]=sel().filter(k=>(counts()[k]||0)<getMaxQuota(k));
   }catch(e){
     showMsg(`Tidak bisa terhubung ke server (${e.message}).`,"bad");
   }
