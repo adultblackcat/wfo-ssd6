@@ -69,7 +69,7 @@ input[readonly]{opacity:.8}
 <body>
 <div class="wrap">
   <h1>Jadwal Work From Office</h1>
-  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari wajib otomatis bergeser 1 hari setiap bulan (Senin→Selasa→...→Jumat→Senin) dan terkunci otomatis; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 Desember 2026).</p>
+  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari wajib otomatis bergeser 1 hari setiap bulan (Senin→Selasa→...→Jumat→Senin) dan terkunci otomatis; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 dan 28–31 Desember 2026).</p>
   <div id="demo" class="demo" hidden>Mode demo: halaman belum terhubung ke Google Sheets, jadi data tidak tersimpan. NIK uji coba: 1001–1005 dan 2001–2003. Isi SCRIPT_URL di bagian atas script untuk menghubungkannya.</div>
 
   <div class="grid">
@@ -142,9 +142,10 @@ function isFirstWeekSplit(monthYm){
   return firstDow>=2&&firstDow<=5;
 }
 
-// Kuota khusus per tanggal (21-24 Desember 2026 maksimal 17 orang)
+// Kuota khusus per tanggal (21-24 dan 28-31 Desember 2026 maksimal 17 orang)
 function getMaxQuota(k){
-  return (k>="2026-12-21"&&k<="2026-12-24")?17:MAX_QUOTA;
+  if((k>="2026-12-21"&&k<="2026-12-24")||(k>="2026-12-28"&&k<="2026-12-31"))return 17;
+  return MAX_QUOTA;
 }
 
 // Target hari WFO per minggu:
@@ -407,7 +408,7 @@ $("#days").addEventListener("click",e=>{
     const ws=weekStart(k), w=monthWeeks().find(x=>x.start===ws), inWeek=s.filter(x=>weekStart(x)===ws);
     if(w&&inWeek.length>need(w)){
       const old=inWeek.find(x=>!isRequiredDate(x));
-      if(old)selByMonth[ym()]=s.filter(x=>x!==old);
+      if(old)selByMonth[ym()]=s.filter(x=>!old.includes(x));
     }
   }
   render();
