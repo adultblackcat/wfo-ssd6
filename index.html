@@ -40,7 +40,8 @@ h1{font-size:clamp(1.8rem,4vw,2.6rem);font-weight:800;letter-spacing:-.02em;marg
 .day.ok{background:var(--ok);color:var(--ok-ink)}
 .day.warn{background:var(--warn);color:var(--warn-ink)}
 .day.full{background:var(--full);color:var(--full-ink)}
-.day.off{background:transparent;color:var(--muted);opacity:.45;cursor:not-allowed}
+.day.off{background:transparent;color:var(--muted);opacity:.5;cursor:not-allowed}
+.day.holiday{background:transparent;color:var(--full-ink);opacity:.65;cursor:not-allowed}
 .day.empty{visibility:hidden}
 .day.sel{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
 .day:disabled{cursor-not-allowed}
@@ -69,7 +70,7 @@ input[readonly]{opacity:.8}
 <body>
 <div class="wrap">
   <h1>Jadwal Work From Office</h1>
-  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari wajib otomatis bergeser 1 hari setiap bulan (Senin→Selasa→...→Jumat→Senin) dan terkunci otomatis; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 dan 28–31 Desember 2026).</p>
+  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari wajib otomatis bergeser 1 hari setiap bulan (Senin→Selasa→...→Jumat→Senin) dan terkunci otomatis; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Akhir pekan dan tanggal merah nasional Indonesia tidak dapat dipilih. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 dan 28–31 Desember 2026).</p>
   <div id="demo" class="demo" hidden>Mode demo: halaman belum terhubung ke Google Sheets, jadi data tidak tersimpan. NIK uji coba: 1001–1005 dan 2001–2003. Isi SCRIPT_URL di bagian atas script untuk menghubungkannya.</div>
 
   <div class="grid">
@@ -112,9 +113,51 @@ const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwKdmALfQ6sPUBJIDo6E
 const MAX_QUOTA  = 15;          // harus sama dengan MAX_QUOTA di Code.gs
 const BULAN_KE_DEPAN = 2;       // harus sama dengan BULAN_KE_DEPAN di Code.gs
 const BASE_WAJIB_MONTH = "2026-11"; // bulan acuan awal kolom Wajib di Data Karyawan (harus sama dengan Code.gs)
+
+// Daftar Hari Libur Nasional Indonesia (harus sama dengan LIBUR_NASIONAL di Code.gs)
+const HOLIDAYS_ID = {
+  // 2026
+  "2026-01-01": "Tahun Baru 2026 Masehi",
+  "2026-01-16": "Isra Mikraj Nabi Muhammad SAW",
+  "2026-02-17": "Tahun Baru Imlek 2577 Kongzili",
+  "2026-03-19": "Hari Suci Nyepi Tahun Baru Saka 1948",
+  "2026-03-20": "Hari Raya Idulfitri 1447 Hijriah",
+  "2026-03-21": "Hari Raya Idulfitri 1447 Hijriah",
+  "2026-04-03": "Wafat Yesus Kristus",
+  "2026-04-05": "Kebangkitan Yesus Kristus (Paskah)",
+  "2026-05-01": "Hari Buruh Internasional",
+  "2026-05-14": "Kenaikan Yesus Kristus",
+  "2026-05-27": "Hari Raya Iduladha 1447 Hijriah",
+  "2026-05-31": "Hari Raya Waisak 2570 BE",
+  "2026-06-01": "Hari Lahir Pancasila",
+  "2026-06-16": "Tahun Baru Islam 1448 Hijriah",
+  "2026-08-17": "Hari Kemerdekaan Republik Indonesia",
+  "2026-08-25": "Maulid Nabi Muhammad SAW",
+  "2026-12-25": "Hari Raya Natal",
+  // 2027
+  "2027-01-01": "Tahun Baru 2027 Masehi",
+  "2027-01-05": "Isra Mikraj Nabi Muhammad SAW",
+  "2027-02-06": "Tahun Baru Imlek 2578 Kongzili",
+  "2027-03-08": "Hari Suci Nyepi Tahun Baru Saka 1949",
+  "2027-03-10": "Hari Raya Idulfitri 1448 Hijriah",
+  "2027-03-11": "Hari Raya Idulfitri 1448 Hijriah",
+  "2027-03-26": "Wafat Yesus Kristus",
+  "2027-03-28": "Kebangkitan Yesus Kristus (Paskah)",
+  "2027-05-01": "Hari Buruh Internasional",
+  "2027-05-06": "Kenaikan Yesus Kristus",
+  "2027-05-17": "Hari Raya Iduladha 1448 Hijriah",
+  "2027-05-20": "Hari Raya Waisak 2571 BE",
+  "2027-06-01": "Hari Lahir Pancasila",
+  "2027-06-06": "Tahun Baru Islam 1449 Hijriah",
+  "2027-08-15": "Maulid Nabi Muhammad SAW",
+  "2027-08-17": "Hari Kemerdekaan Republik Indonesia",
+  "2027-12-25": "Hari Raya Natal"
+};
 /* ======================== */
 
 const HARI_NAMA = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
+const getHolidayName = k => HOLIDAYS_ID[k] || "";
+const isHoliday = k => Boolean(HOLIDAYS_ID[k]);
 
 function monthIdxFromYm(monthYm){
   const [y,m]=monthYm.split("-").map(Number);
@@ -122,7 +165,6 @@ function monthIdxFromYm(monthYm){
 }
 
 // Geser hari wajib (1=Senin..5=Jumat) berdasarkan selisih bulan dari BASE_WAJIB_MONTH.
-// Setiap maju 1 bulan, hari wajib bergeser 1 hari (Senin->Selasa->Rabu->Kamis->Jumat->Senin).
 function shiftWeekday(baseDay, monthYm){
   if(baseDay===null||baseDay===undefined)return null;
   const diff=monthIdxFromYm(monthYm)-monthIdxFromYm(BASE_WAJIB_MONTH);
@@ -230,7 +272,7 @@ function monthWeeks(){
     if((new Date(viewY,viewM,d).getDay()+6)%7>=5)continue;   // lewati Sabtu & Minggu
     const k=keyOf(viewY,viewM,d), ws=weekStart(k);
     const w=map[ws]||(map[ws]={start:ws,eligible:[]});
-    if(k>=todayKey&&effectiveCount(k)<getMaxQuota(k))w.eligible.push(k);
+    if(k>=todayKey && !isHoliday(k) && effectiveCount(k)<getMaxQuota(k))w.eligible.push(k);
   }
   return Object.values(map);
 }
@@ -250,7 +292,9 @@ function effectiveWajibDayForDate(k){
   return shiftWeekday(profile.baseWajibDay, monthYm);
 }
 
+// Tanggal merah nasional tidak pernah dijadikan tanggal wajib terkunci
 function isRequiredDate(k){
+  if(isHoliday(k))return false;
   const reqDow=effectiveWajibDayForDate(k);
   if(reqDow===null)return false;
   const [y,m,d]=k.split("-").map(Number);
@@ -266,7 +310,7 @@ function requiredDates(){
   return out;
 }
 function ensureRequiredSelection(){
-  const req=requiredDates(), old=sel();
+  const req=requiredDates(), old=sel().filter(k=>!isHoliday(k));
   selByMonth[ym()]=[...new Set([...req,...old])].sort();
 }
 function isLastWeek(w){
@@ -339,14 +383,16 @@ function render(){
   for(let i=0;i<offset;i++)html+='<span class="day empty"></span>';
   for(let d=1;d<=total;d++){
     const k=keyOf(viewY,viewM,d), dow=(offset+d-1)%7, quota=getMaxQuota(k);
-    const weekend=dow>=5, past=k<todayKey, used=c[k]||0, full=used>=quota, required=isRequiredDate(k), isSel=s.includes(k)||required;
+    const weekend=dow>=5, holiday=getHolidayName(k), past=k<todayKey, used=c[k]||0, full=used>=quota, required=isRequiredDate(k), isSel=s.includes(k)||required;
     let cls="", sub="", dis=false;
     if(weekend||past){cls="off";dis=true;}
+    else if(holiday){cls="holiday";sub="Libur";dis=true;}
     else if(full){cls="full";sub="Penuh";dis=true;}
     else{cls=used>=(quota-5)?"warn":"ok";sub=`${used}/${quota}`;}
     if(required){cls="sel";sub=full?"Wajib · Penuh":"Wajib";dis=true;}
     else if(isSel){cls+=" sel";dis=false;}
-    html+=`<button class="day ${cls}" data-k="${k}" ${dis?"disabled":""} aria-label="${d} ${MONTHS[viewM]}${sub?", terisi "+sub:""}" aria-pressed="${isSel}"><b>${d}</b><small>${sub}</small></button>`;
+    const ariaExtra=holiday?`, Libur Nasional: ${holiday}`:(sub?", terisi "+sub:"");
+    html+=`<button class="day ${cls}" data-k="${k}" ${holiday?`title="${holiday}"`:""} ${dis?"disabled":""} aria-label="${d} ${MONTHS[viewM]}${ariaExtra}" aria-pressed="${isSel}"><b>${d}</b><small>${sub}</small></button>`;
   }
   $("#days").innerHTML=html;
   updatePanel();
@@ -398,6 +444,7 @@ $("#days").addEventListener("click",e=>{
   const b=e.target.closest(".day[data-k]"); if(!b||b.disabled||sending)return;
   const k=b.dataset.k;
   if(!profile){showMsg(nikMsg||"Isi NIK yang terdaftar terlebih dahulu.","bad");return;}
+  if(isHoliday(k)){showMsg(`Tanggal ini adalah hari libur nasional (${getHolidayName(k)}) dan tidak bisa dipilih.`,"bad");return;}
   if(isRequiredDate(k)){showMsg("Tanggal ini adalah hari wajib WFO dan tidak bisa diubah.","bad");return;}
   if(profile.sudahIsi){showMsg("Jadwal bulan ini sudah tersimpan. Hubungi admin jika perlu diubah.","bad");return;}
   hideMsg();
@@ -420,7 +467,7 @@ function go(delta){
   viewY=Math.floor(i/12);viewM=i%12;hideMsg();
   if(profile)profile.sudahIsi=false;
   if(profile&&!profile.sudahIsi){
-    selByMonth[ym()]=sel().filter(k=>!isRequiredDate(k));
+    selByMonth[ym()]=sel().filter(k=>!isRequiredDate(k)&&!isHoliday(k));
     ensureRequiredSelection();
     trimSelection();
   }
@@ -456,7 +503,7 @@ $("#submit").onclick=async()=>{
     if(res.ok){showMsg(res.message||"Jadwal WFO tersimpan.","good");profile.sudahIsi=true;}
     else showMsg(res.error||"Gagal menyimpan jadwal.","bad");
     await loadCounts();
-    if(!res.ok)selByMonth[ym()]=sel().filter(k=>(counts()[k]||0)<getMaxQuota(k));
+    if(!res.ok)selByMonth[ym()]=sel().filter(k=>(counts()[k]||0)<getMaxQuota(k)&&!isHoliday(k));
   }catch(e){
     showMsg(`Tidak bisa terhubung ke server (${e.message}).`,"bad");
   }
