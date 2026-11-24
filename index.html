@@ -164,7 +164,6 @@ function monthIdxFromYm(monthYm){
   return y*12+(m-1);
 }
 
-// Geser hari wajib (1=Senin..5=Jumat) berdasarkan selisih bulan dari BASE_WAJIB_MONTH.
 function shiftWeekday(baseDay, monthYm){
   if(baseDay===null||baseDay===undefined)return null;
   const diff=monthIdxFromYm(monthYm)-monthIdxFromYm(BASE_WAJIB_MONTH);
@@ -177,20 +176,17 @@ function prevMonthYm(monthYm){
   return m===1?`${y-1}-12`:`${y}-${pad(m-1)}`;
 }
 
-// Cek apakah tanggal 1 bulan (monthYm) bukan Senin (Selasa-Jumat)
 function isFirstWeekSplit(monthYm){
   const [y,m]=monthYm.split("-").map(Number);
-  const firstDow=new Date(y,m-1,1).getDay(); // 0=Min, 1=Sen, 2=Sel..5=Jum, 6=Sab
+  const firstDow=new Date(y,m-1,1).getDay();
   return firstDow>=2&&firstDow<=5;
 }
 
-// Kuota khusus per tanggal (21-24 dan 28-31 Desember 2026 maksimal 17 orang)
 function getMaxQuota(k){
   if((k>="2026-12-21"&&k<="2026-12-24")||(k>="2026-12-28"&&k<="2026-12-31"))return 17;
   return MAX_QUOTA;
 }
 
-// Data contoh hanya untuk mode demo (saat SCRIPT_URL kosong)
 const DEMO_KARYAWAN = {
   "1001":{nama:"Ayu Lestari",tim:"Finance",hari:2,wajibDay:null},"1002":{nama:"Bagas Pratama",tim:"Finance",hari:2,wajibDay:null},
   "1003":{nama:"Citra Dewi",tim:"HR",hari:2,wajibDay:null},"1004":{nama:"Dimas Putra",tim:"IT",hari:2,wajibDay:null},"1005":{nama:"Eka Wulandari",tim:"IT",hari:2,wajibDay:null},
@@ -210,7 +206,7 @@ const todayKey=keyOf(now.getFullYear(),now.getMonth(),now.getDate());
 const minMonth=now.getFullYear()*12+now.getMonth();
 const maxMonth=minMonth+BULAN_KE_DEPAN;
 let viewY=now.getFullYear(), viewM=now.getMonth();
-let countsByMonth={}, selByMonth={}, profile=null, nikMsg="", sending=false, lookupTimer=null;
+let countsByMonth={}, selByMonth={}, profile=null, nikMsg="", sending=false, loadingProfile=false, lookupTimer=null, reqSeq=0;
 
 const ym=()=>`${viewY}-${pad(viewM+1)}`;
 const sel=()=>selByMonth[ym()]||(selByMonth[ym()]=[]);
@@ -238,8 +234,27 @@ function demoLookup(nik,my){
   return{terdaftar:true,nama:k.nama,tim:k.tim,hari:k.hari,wajibDay:k.wajibDay,sudahIsi:!!saved,tanggal:saved||[]};
 }
 
-/* ---------- utilitas ---------- */
-async function api(p){return (await fetch(SCRIPT_URL+"?"+new URLSearchParams(p))).json();}
+/* ---------- jaringan tahan antrean (retry + timeout) ---------- */
+async function fetchJsonRetry(url, opts, retries=2){
+  let lastErr;
+  for(let attempt=0; attempt<=retries; attempt++){
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(), 18000);
+    try{
+      const res=await fetch(url, {...opts, signal:ctrl.signal});
+      clearTimeout(timer);
+      const text=await res.text();
+      return JSON.parse(text);
+    }catch(err){
+      clearTimeout(timer);
+      lastErr=err.name==="AbortError"?new Error("Server sibuk/timeout, mencoba ulang..."):err;
+      if(attempt<retries)await new Promise(r=>setTimeout(r, 450*(attempt+1)+Math.random()*300));
+    }
+  }
+  throw lastErr;
+}
+async function api(p){return fetchJsonRetry(SCRIPT_URL+"?"+new URLSearchParams(p), {}, 2);}
+
 function weekStart(k){
   const [y,m,d]=k.split("-").map(Number), dt=new Date(Date.UTC(y,m-1,d,12));
   dt.setUTCDate(dt.getUTCDate()-((dt.getUTCDay()+6)%7));
@@ -254,7 +269,7 @@ function hideMsg(){$("#msg").className="msg";}
 function monthWeeks(){
   const total=new Date(viewY,viewM+1,0).getDate(), map={};
   for(let d=1;d<=total;d++){
-    if((new Date(viewY,viewM,d).getDay()+6)%7>=5)continue;   // lewati Sabtu & Minggu
+    if((new Date(viewY,viewM,d).getDay()+6)%7>=5)continue;
     const k=keyOf(viewY,viewM,d), ws=weekStart(k);
     const w=map[ws]||(map[ws]={start:ws,eligible:[]});
     if(k>=todayKey && !isHoliday(k) && effectiveCount(k)<getMaxQuota(k))w.eligible.push(k);
@@ -264,9 +279,6 @@ function monthWeeks(){
 const need=w=>profile?Math.min(profile.hari,w.eligible.length):0;
 const selectedIn=w=>sel().filter(k=>weekStart(k)===w.start);
 
-// Hari wajib efektif untuk tanggal k:
-// Jika k berada di minggu pertama bulan yang tanggal 1-nya bukan Senin, gunakan hari wajib bulan sebelumnya.
-// Minggu kedua hingga akhir bulan gunakan hari wajib bulan berjalan (hasil rotasi).
 function effectiveWajibDayForDate(k){
   if(!profile||profile.baseWajibDay===null||profile.baseWajibDay===undefined)return null;
   const monthYm=k.slice(0,7);
@@ -277,7 +289,6 @@ function effectiveWajibDayForDate(k){
   return shiftWeekday(profile.baseWajibDay, monthYm);
 }
 
-// Tanggal merah nasional tidak pernah dijadikan tanggal wajib terkunci
 function isRequiredDate(k){
   if(isHoliday(k))return false;
   const reqDow=effectiveWajibDayForDate(k);
@@ -310,7 +321,7 @@ function isFlexibleWeek(w){
   return isFirstSplitWeek(w) || isLastWeek(w);
 }
 function complete(){
-  if(!profile||profile.sudahIsi)return false;
+  if(!profile||profile.sudahIsi||loadingProfile)return false;
   const ws=monthWeeks().filter(w=>need(w)>0&&!isFlexibleWeek(w));
   const req=requiredDates();
   if(req.some(k=>effectiveCount(k)>=getMaxQuota(k)))return false;
@@ -327,18 +338,7 @@ function trimSelection(){
   });
 }
 
-/* ---------- data dari server ---------- */
-async function loadCounts(){
-  const my=ym();
-  try{
-    let c;
-    if(DEMO)c=demoCounts(my);
-    else{const j=await api({action:"counts",bulan:my});if(!j.ok)throw new Error(j.error||"respon tidak valid");c=j.counts;}
-    countsByMonth[my]=c;
-  }catch(e){showMsg(`Gagal memuat data kuota (${e.message}).`,"bad");}
-  if(my===ym())render();
-}
-
+/* ---------- sinkronisasi data dari server ---------- */
 function clearProfile(){
   if(profile)selByMonth[ym()]=[];
   profile=null;nikMsg="";$("#nama").value="";updatePanel();
@@ -349,20 +349,45 @@ function applyProfile(nik,r){
   const baseWajib=(r.baseWajibDay!==undefined&&r.baseWajibDay!==null)?r.baseWajibDay:(r.wajibDay===undefined?null:r.wajibDay);
   profile={nik,nama:r.nama,tim:r.tim,hari:r.hari,baseWajibDay:baseWajib,wajibText:r.wajibText||"",sudahIsi:r.sudahIsi};
   nikMsg="";$("#nama").value=r.nama;
-  if(r.sudahIsi)selByMonth[ym()]=r.tanggal||[];
-  else{if(wasSaved)selByMonth[ym()]=[];ensureRequiredSelection();trimSelection();}
+  if(r.sudahIsi)selByMonth[ym()]=(r.tanggal||[]).slice().sort();
+  else{
+    if(wasSaved)selByMonth[ym()]=[];
+    selByMonth[ym()]=sel().filter(k=>!isHoliday(k));
+    ensureRequiredSelection();
+    trimSelection();
+  }
   render();
 }
-async function lookup(){
-  const nik=nikVal(), my=ym();
-  if(!NIK_RE.test(nik)){clearProfile();return;}
+
+// Satu request terpadu: memuat kuota bulan + profil NIK (jika NIK sudah diisi)
+async function syncMonthAndNik(){
+  const my=ym(), nik=nikVal(), hasNik=NIK_RE.test(nik);
+  const seq=++reqSeq;
+  if(hasNik){loadingProfile=true;updatePanel();}
   try{
-    let r;
-    if(DEMO)r=demoLookup(nik,my);
-    else{r=await api({action:"nik",nik,bulan:my});if(!r.ok)throw new Error(r.error||"respon tidak valid");}
-    if(nik!==nikVal()||my!==ym())return;
-    applyProfile(nik,r);
-  }catch(e){nikMsg=`Gagal memeriksa NIK (${e.message}).`;updatePanel();}
+    if(DEMO){
+      countsByMonth[my]=demoCounts(my);
+      if(hasNik)applyProfile(nik, demoLookup(nik,my));
+      else render();
+    }else{
+      const params=hasNik?{action:"init",nik,bulan:my}:{action:"counts",bulan:my};
+      const j=await api(params);
+      if(!j.ok)throw new Error(j.error||"respon tidak valid");
+      if(seq!==reqSeq || my!==ym())return;
+      if(j.counts)countsByMonth[my]=j.counts;
+      if(hasNik && nik===nikVal()){
+        applyProfile(nik, j);
+      }else{
+        render();
+      }
+    }
+  }catch(e){
+    if(seq!==reqSeq)return;
+    if(hasNik){nikMsg=`Gagal memuat data (${e.message}).`;updatePanel();}
+    else showMsg(`Gagal memuat data kuota (${e.message}).`,"bad");
+  }finally{
+    if(seq===reqSeq){loadingProfile=false;updatePanel();}
+  }
 }
 
 /* ---------- tampilan ---------- */
@@ -393,7 +418,10 @@ function render(){
 function updatePanel(){
   $("#needTitle").textContent=`Jadwal WFO ${MONTHS[viewM]} ${viewY}`;
   const info=$("#nikInfo");
-  if(profile){
+  if(loadingProfile&&!profile){
+    info.className="nikinfo";
+    info.textContent="Memeriksa data NIK dan kuota...";
+  }else if(profile){
     info.className="nikinfo";
     const my=ym();
     if(profile.baseWajibDay!==null&&profile.baseWajibDay!==undefined){
@@ -405,8 +433,10 @@ function updatePanel(){
       const splitNote=isFirstWeekSplit(my)?" (minggu ke-1 & terakhir fleksibel)":"";
       info.textContent=`Tim: ${profile.tim||"-"} · Wajib 2 hari WFO per minggu${splitNote}.`;
     }
+  }else{
+    info.className="nikinfo"+(nikMsg?" bad":"");
+    info.textContent=nikMsg||"Nama dan tim terisi otomatis setelah NIK terdaftar diisi.";
   }
-  else{info.className="nikinfo"+(nikMsg?" bad":"");info.textContent=nikMsg||"Nama dan tim terisi otomatis setelah NIK terdaftar diisi.";}
 
   const list=$("#weeks"); let sub="";
   if(!profile){sub="Isi NIK yang terdaftar untuk mulai memilih tanggal.";list.innerHTML="";}
@@ -431,13 +461,13 @@ function updatePanel(){
     }).join("");
   }
   $("#needSub").textContent=sub;
-  $("#submit").disabled=sending||!complete();
-  $("#submit").textContent=sending?"Menyimpan...":`Simpan jadwal ${MONTHS[viewM]}`;
+  $("#submit").disabled=sending||loadingProfile||!complete();
+  $("#submit").textContent=sending?"Menyimpan...":(loadingProfile?"Memuat data...":`Simpan jadwal ${MONTHS[viewM]}`);
 }
 
 /* ---------- interaksi ---------- */
 $("#days").addEventListener("click",e=>{
-  const b=e.target.closest(".day[data-k]"); if(!b||b.disabled||sending)return;
+  const b=e.target.closest(".day[data-k]"); if(!b||b.disabled||sending||loadingProfile)return;
   const k=b.dataset.k;
   if(!profile){showMsg(nikMsg||"Isi NIK yang terdaftar terlebih dahulu.","bad");return;}
   if(isHoliday(k)){showMsg(`Tanggal ini adalah hari libur nasional (${getHolidayName(k)}) dan tidak bisa dipilih.`,"bad");return;}
@@ -461,14 +491,14 @@ function go(delta){
   if(sending)return;
   const i=viewY*12+viewM+delta; if(i<minMonth||i>maxMonth)return;
   viewY=Math.floor(i/12);viewM=i%12;hideMsg();
-  if(profile)profile.sudahIsi=false;
-  if(profile&&!profile.sudahIsi){
+  if(profile){
+    profile.sudahIsi=false;
     selByMonth[ym()]=sel().filter(k=>!isRequiredDate(k)&&!isHoliday(k));
     ensureRequiredSelection();
     trimSelection();
   }
-  render();loadCounts();
-  if(NIK_RE.test(nikVal()))lookup();
+  render();
+  syncMonthAndNik();
 }
 $("#prev").onclick=()=>go(-1);
 $("#next").onclick=()=>go(1);
@@ -477,12 +507,14 @@ $("#nik").addEventListener("input",()=>{
   clearTimeout(lookupTimer);
   if(profile&&profile.nik!==nikVal())clearProfile();
   else if(nikMsg){nikMsg="";updatePanel();}
-  lookupTimer=setTimeout(lookup,400);
+  lookupTimer=setTimeout(syncMonthAndNik, 350);
 });
 
 $("#submit").onclick=async()=>{
-  if(!profile||!complete())return;
-  const tanggal=[...sel()].sort();
+  if(!profile||!complete()||sending)return;
+  // Pastikan seluruh tanggal wajib ikut terkirim sebelum POST
+  ensureRequiredSelection();
+  const tanggal=[...new Set(sel())].sort();
   sending=true;hideMsg();updatePanel();
   try{
     let res;
@@ -493,20 +525,30 @@ $("#submit").onclick=async()=>{
       else{tanggal.forEach(t=>c[t]=(c[t]||0)+1);demoSaved[ym()+"|"+profile.nik]=tanggal;
         res={ok:true,message:`Jadwal ${MONTHS[viewM]} tersimpan untuk ${tanggal.length} hari (mode demo).`};}
     }else{
-      const r=await fetch(SCRIPT_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({nik:profile.nik,tanggal})});
-      res=await r.json();
+      res=await fetchJsonRetry(SCRIPT_URL,{
+        method:"POST",
+        headers:{"Content-Type":"text/plain;charset=utf-8"},
+        body:JSON.stringify({nik:profile.nik,bulan:ym(),tanggal})
+      }, 1);
     }
-    if(res.ok){showMsg(res.message||"Jadwal WFO tersimpan.","good");profile.sudahIsi=true;}
-    else showMsg(res.error||"Gagal menyimpan jadwal.","bad");
-    await loadCounts();
+    if(res.ok){
+      showMsg(res.message||"Jadwal WFO tersimpan.","good");
+      profile.sudahIsi=true;
+      if(Array.isArray(res.tanggal))selByMonth[ym()]=res.tanggal;
+      if(res.counts)countsByMonth[ym()]=res.counts;
+    }else{
+      showMsg(res.error||"Gagal menyimpan jadwal.","bad");
+    }
+    await syncMonthAndNik();
     if(!res.ok)selByMonth[ym()]=sel().filter(k=>(counts()[k]||0)<getMaxQuota(k)&&!isHoliday(k));
   }catch(e){
-    showMsg(`Tidak bisa terhubung ke server (${e.message}).`,"bad");
+    showMsg(`Tidak bisa terhubung ke server (${e.message}). Silakan klik Simpan lagi.`,"bad");
   }
   sending=false;render();
 };
 
-render();loadCounts();
+render();
+syncMonthAndNik();
 </script>
 </body>
 </html>
