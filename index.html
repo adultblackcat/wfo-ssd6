@@ -70,7 +70,7 @@ input[readonly]{opacity:.8}
 <body>
 <div class="wrap">
   <h1>Jadwal Work From Office</h1>
-  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari wajib otomatis bergeser 1 hari setiap bulan (Senin→Selasa→...→Jumat→Senin) dan terkunci otomatis; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Akhir pekan dan tanggal merah nasional Indonesia tidak dapat dipilih. Minggu terakhir fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 dan 28–31 Desember 2026).</p>
+  <p class="lead">Isi NIK Anda, lalu pilih tanggal WFO di kalender. Jika kolom Wajib di Data Karyawan berisi hari kerja, hari wajib otomatis bergeser 1 hari setiap bulan (Senin→Selasa→...→Jumat→Senin) dan terkunci otomatis; pilih 1 hari tambahan per minggu. Jika kolom Wajib kosong, pilih 2 hari per minggu. Akhir pekan dan tanggal merah nasional Indonesia tidak dapat dipilih. Minggu pertama yang terpotong bulan sebelumnya dan minggu terakhir bersifat fleksibel. Kuota WFO maksimal 15 orang per hari (17 orang untuk 21–24 dan 28–31 Desember 2026).</p>
   <div id="demo" class="demo" hidden>Mode demo: halaman belum terhubung ke Google Sheets, jadi data tidak tersimpan. NIK uji coba: 1001–1005 dan 2001–2003. Isi SCRIPT_URL di bagian atas script untuk menghubungkannya.</div>
 
   <div class="grid">
@@ -190,21 +190,6 @@ function getMaxQuota(k){
   return MAX_QUOTA;
 }
 
-// Target hari WFO per minggu:
-// Jika tanggal 1 bulan bukan Senin (Sel-Jum), minggu pertama mengikuti jadwal wajib bulan sebelumnya.
-// Jika hari wajib bulan sebelumnya jatuh sebelum tanggal 1 (di akhir bulan lalu), maka di bulan berjalan cukup pilih 1 hari.
-function targetHariMinggu(ws, monthYm, prof){
-  if(!prof)return 0;
-  const firstWs=weekStart(monthYm+"-01");
-  if(ws===firstWs && isFirstWeekSplit(monthYm) && prof.baseWajibDay!==null && prof.baseWajibDay!==undefined){
-    const prevWajib=shiftWeekday(prof.baseWajibDay, prevMonthYm(monthYm));
-    const [y,m]=monthYm.split("-").map(Number);
-    const firstDow=new Date(y,m-1,1).getDay();
-    if(prevWajib<firstDow)return 1;
-  }
-  return prof.hari;
-}
-
 // Data contoh hanya untuk mode demo (saat SCRIPT_URL kosong)
 const DEMO_KARYAWAN = {
   "1001":{nama:"Ayu Lestari",tim:"Finance",hari:2,wajibDay:null},"1002":{nama:"Bagas Pratama",tim:"Finance",hari:2,wajibDay:null},
@@ -276,7 +261,7 @@ function monthWeeks(){
   }
   return Object.values(map);
 }
-const need=w=>profile?Math.min(targetHariMinggu(w.start,ym(),profile),w.eligible.length):0;
+const need=w=>profile?Math.min(profile.hari,w.eligible.length):0;
 const selectedIn=w=>sel().filter(k=>weekStart(k)===w.start);
 
 // Hari wajib efektif untuk tanggal k:
@@ -313,13 +298,20 @@ function ensureRequiredSelection(){
   const req=requiredDates(), old=sel().filter(k=>!isHoliday(k));
   selByMonth[ym()]=[...new Set([...req,...old])].sort();
 }
+function isFirstSplitWeek(w){
+  const my=ym();
+  return isFirstWeekSplit(my) && w.start===weekStart(my+"-01");
+}
 function isLastWeek(w){
   const lastDay=keyOf(viewY,viewM,new Date(viewY,viewM+1,0).getDate());
   return w.start===weekStart(lastDay);
 }
+function isFlexibleWeek(w){
+  return isFirstSplitWeek(w) || isLastWeek(w);
+}
 function complete(){
   if(!profile||profile.sudahIsi)return false;
-  const ws=monthWeeks().filter(w=>need(w)>0&&!isLastWeek(w));
+  const ws=monthWeeks().filter(w=>need(w)>0&&!isFlexibleWeek(w));
   const req=requiredDates();
   if(req.some(k=>effectiveCount(k)>=getMaxQuota(k)))return false;
   return sel().length>0&&req.every(k=>sel().includes(k))&&ws.every(w=>selectedIn(w).length===need(w));
@@ -407,10 +399,11 @@ function updatePanel(){
     if(profile.baseWajibDay!==null&&profile.baseWajibDay!==undefined){
       const currWajib=shiftWeekday(profile.baseWajibDay,my);
       const prevWajib=shiftWeekday(profile.baseWajibDay,prevMonthYm(my));
-      const splitNote=isFirstWeekSplit(my)?` (minggu ke-1 ikut bulan lalu: ${HARI_NAMA[prevWajib]})`:"";
+      const splitNote=isFirstWeekSplit(my)?` (minggu ke-1 ikut bulan lalu: ${HARI_NAMA[prevWajib]}, fleksibel)`:"";
       info.textContent=`Tim: ${profile.tim||"-"} · Hari wajib bulan ini: ${HARI_NAMA[currWajib]}${splitNote}.`;
     }else{
-      info.textContent=`Tim: ${profile.tim||"-"} · Wajib 2 hari WFO per minggu.`;
+      const splitNote=isFirstWeekSplit(my)?" (minggu ke-1 & terakhir fleksibel)":"";
+      info.textContent=`Tim: ${profile.tim||"-"} · Wajib 2 hari WFO per minggu${splitNote}.`;
     }
   }
   else{info.className="nikinfo"+(nikMsg?" bad":"");info.textContent=nikMsg||"Nama dan tim terisi otomatis setelah NIK terdaftar diisi.";}
@@ -423,11 +416,14 @@ function updatePanel(){
   }else{
     const ws=monthWeeks().filter(w=>need(w)>0);
     const my=ym();
-    const split=isFirstWeekSplit(my)&&profile.baseWajibDay!==null&&profile.baseWajibDay!==undefined;
-    sub=ws.length?(profile.baseWajibDay!==null&&profile.baseWajibDay!==undefined?`Hari wajib otomatis terpilih dan terkunci${split?" (minggu ke-1 mengikuti jadwal wajib bulan lalu)":""}; pilih 1 hari tambahan per minggu. Minggu terakhir fleksibel.`:"Pilih 2 hari WFO setiap minggu. Minggu terakhir bulan fleksibel dan boleh memilih kurang dari 2 hari.")+" Pilihan baru menggantikan pilihan terlama yang bisa diubah di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
+    const split=isFirstWeekSplit(my);
+    sub=ws.length?(profile.baseWajibDay!==null&&profile.baseWajibDay!==undefined?`Hari wajib otomatis terpilih dan terkunci${split?" (minggu ke-1 mengikuti jadwal wajib bulan lalu dan bersifat fleksibel)":""}; pilih 1 hari tambahan per minggu. Minggu terakhir fleksibel.`:`Pilih 2 hari WFO setiap minggu. ${split?"Minggu pertama dan minggu terakhir":"Minggu terakhir"} bulan fleksibel dan boleh memilih 1 atau 2 hari.`) + " Pilihan baru menggantikan pilihan terlama yang bisa diubah di minggu yang sama.":"Tidak ada tanggal yang bisa dipilih di bulan ini.";
     list.innerHTML=ws.map(w=>{
       const n=selectedIn(w).length, r=need(w);
       const a=Number(w.eligible[0].slice(8)), b=Number(w.eligible[w.eligible.length-1].slice(8));
+      if(isFirstSplitWeek(w)){
+        return `<li class="${n>0?"done":""}"><span>${a===b?a:a+"–"+b} ${SHORT[viewM]} · Minggu ke-1</span><span>${n} hari · fleksibel</span></li>`;
+      }
       if(isLastWeek(w)){
         return `<li class="${n>0?"done":""}"><span>${a===b?a:a+"–"+b} ${SHORT[viewM]} · Minggu terakhir</span><span>${n} hari · fleksibel</span></li>`;
       }
